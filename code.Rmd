@@ -1,0 +1,312 @@
+---
+title: "ProjectI"
+author: "Charlotte Xu, Ruiyang Dong, Zihan Wang"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+# knitr::opts_chunk$set(out.width="200px", dpi=120)
+library(dplyr)
+library(ggplot2)
+# install.packages("GGally")
+library(GGally)
+library(circular)
+library(lubridate)
+# install.packages("corrplot")
+library(corrplot)
+library(gtsummary)
+library(readxl)
+
+```
+
+```{r}
+ST01 <- readxl::read_excel("620GroupData.xlsx",sheet = '01')
+ST02 <- readxl::read_excel("620GroupData.xlsx",sheet = '02')
+# ST03 <- readxl::read_excel("620GroupData.xlsx",sheet = '01')
+# combined_df <- bind_rows(df_01, df_02, df_03)
+ST01
+```
+
+```{r}
+
+ST01$Date <- as.Date(ST01$Date)
+ST01$Pickup.1st <- format(ST01$Pickup.1st, format = "%H:%M")
+ST01$Daily_Proportion_Social_Screen_Time <- ST01$Social.ST.min / ST01$Total.ST.min
+ST01$Daily_Duration_Per_Use <- ST01$Total.ST.min / ST01$Pickups
+colnames(ST01)
+quantiles <- quantile(ST01$Total.ST.min, probs = c(1/3, 2/3), na.rm = TRUE)
+ST01$YQuantile <- as.character(cut(ST01$Total.ST.min, breaks = c(-Inf, quantiles, Inf), labels = c("Low", "Medium", "High"), include.lowest = TRUE))
+
+ST01[c("YQuantile","Total.ST.min", "Social.ST.min",'YQuantile', "Pickups", "Daily.Course.Hour", "Snow.NotSnow", "Daily_Proportion_Social_Screen_Time","Daily_Duration_Per_Use")]
+```
+### Corr Plot
+```{r}
+ST01_numerical <- ST01[c("Total.ST.min", "Social.ST.min", "Pickups", "Daily.Course.Hour", "Snow.NotSnow", "Daily_Proportion_Social_Screen_Time","Daily_Duration_Per_Use")]
+
+correlation_matrix <- cor(ST01_numerical, use = "complete.obs")
+
+corrplot(correlation_matrix, method = "color", type = "upper", addCoef.col = "black", tl.col = "black", tl.srt = 45, cl.ratio = 0.3, number.cex = 0.6)
+
+```
+### TBL 1 for Screen Activity Data
+```{r}
+ST01_tbl1 <- ST01[c("YQuantile", "Social.ST.min", "Pickups", "Daily.Course.Hour", "Snow.NotSnow", "Daily_Proportion_Social_Screen_Time","Daily_Duration_Per_Use")]
+ST01_tbl1
+TABLE1 <- ST01_tbl1 %>% 
+  tbl_summary(
+    missing = "no",
+    by = YQuantile,
+    statistic = list(
+                     all_categorical() ~ "{n}    ({p}%)"),
+    digits = list(all_continuous()  ~ c(1, 1),
+                  all_categorical() ~ c(0, 1)),
+    type = list(
+      # Total.ST.min ~ "continuous",
+      Social.ST.min ~ "continuous",
+      Pickups ~ "continuous",
+      'Daily.Course.Hour' ~ 'continuous',
+      # 'Snow/Not Snow' ~ "categorical",
+      Daily_Proportion_Social_Screen_Time ~ "continuous",
+      Daily_Duration_Per_Use ~ "continuous"
+    ),
+    label = list(
+      # Total.ST.min ~ "Total.ST.min",
+      Social.ST.min ~ "Social.ST.min",
+      Pickups ~ "Pickups",
+      'Daily.Course.Hour' ~ 'Daily Course Hour',
+      # 'Snow/Not Snow' ~ "Snow/Not Snow",
+      Daily_Proportion_Social_Screen_Time ~ "Social Use proportion",
+      Daily_Duration_Per_Use ~ "Daily Duration Per Use"
+    )
+  ) %>%
+  add_p(test = all_continuous()  ~ "t.test", pvalue_fun = function(x) style_pvalue(x, digits = 3)) %>%
+  modify_header(
+    label = "**Variable**",
+    all_stat_cols() ~ "**{level}**<br>N = {n} ({style_percent(p, digits = 1)}%)"
+  ) %>%
+  modify_caption("Daily Screen Activity Characteristics") %>%
+  bold_labels() %>% 
+  add_overall(last = FALSE, col_label = "**All Days**<br>N = {N}")
+
+TABLE1
+
+```
+
+### Screen time - EDA
+```{r}
+ST01_tbl1 <- ST01[c("Total.ST.min", "Social.ST.min", "Pickups", "Daily.Course.Hour", "Daily_Proportion_Social_Screen_Time",'Snow.NotSnow',"Daily_Duration_Per_Use")]
+
+ST01 <- ST01 %>%
+  mutate(Centralized_Total_ST_min = Total.ST.min - mean(Total.ST.min, na.rm = TRUE))
+
+acf_totST <-
+  acf(ST01["Centralized_Total_ST_min"], main = "ACF - Total Screen Time (Centralized)", lag.max = 20)
+
+# 
+# acf_Snow <-
+#   acf(ST01["Snow/Not Snow"], main = "ACF - Total Screen Time", lag.max = 20)
+# 
+
+
+```
+
+```{r}
+ST01 <- ST01 %>%
+  mutate(weekend = ifelse(Day %in% c("Sun", "Sat"), TRUE, FALSE))
+
+# Total screen time
+total <-
+  ggplot(ST01, aes(
+    x = Date,
+    y = Total.ST.min,
+    color = factor(ID),
+     fill = ifelse(weekend, "red", "black"),
+  )) +
+  geom_line(color = "steelblue") +
+  geom_point() +
+  ylim(100, 900) +
+  xlab("Dates") + ylab("Total screen time (min)") +
+  labs(title = "Time Series plot - Total Screen Time") +
+  scale_color_manual(values = c("1" = "yellow", "2" = "green", "3" = "blue"), 
+                     name = "ID") +
+  scale_fill_manual(labels = c("Weekday", "Weekend"),
+                    values = c("black", "red")) +
+  guides(stroke = guide_legend(title = "ID")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1),
+        legend.title = element_blank())
+total
+```
+Stacked ?
+```{r}
+stacked_line_plot <- ggplot(ST01, aes(x = Date, y = Total.ST.min, color = factor(ID), group = ID)) +
+  geom_line() +
+  geom_point(color = "steelblue") +
+  ylim(100, 900) +
+  xlab("Dates") + ylab("Total screen time (min)") +
+  labs(title = "Stacked Line Plot - Total Screen Time") +
+  scale_color_manual(values = c("1" = "yellow", "2" = "green", "3" = "blue"), 
+                     name = "ID") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1),
+        legend.title = element_blank())
+
+print(stacked_line_plot)
+```
+```{r}
+# Social screen time
+social <-
+  ggplot(ST01, aes(
+    x = Date,
+    y = Social.ST.min,
+    color = ifelse(weekend, "red", "black")
+  )) +
+  geom_line(color = "steelblue") +
+  geom_point() +
+  xlab("Dates") + ylab("Social screen time (min)") +
+  labs(title = "Time Series plot - Social Screen Time") +
+  theme_minimal() +
+  ylim(100, 900) +
+  scale_color_manual(labels = c("weekdays", "weekends"),
+                     values = c("black", "red")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1),
+        legend.title = element_blank())
+social
+# Pickups
+pickups <-
+  ggplot(ST01, aes(
+    x = Date,
+    y = Pickups,
+    color = ifelse(weekend, "red", "black")
+  )) +
+  geom_line(color = "steelblue") +
+  geom_point() +
+  xlab("Dates") + ylab("Total number of pickups") +
+  labs(title = "Time Series plot - Total number of pickups") +
+  theme_minimal() +
+  scale_color_manual(labels = c("weekdays", "weekends"),
+                     values = c("black", "red")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1),
+        legend.title = element_blank())
+pickups
+# Daily_Proportion_Social_Screen_Time
+PropST <-
+  ggplot(ST01,
+         aes(
+           x = Date,
+           y = Daily_Proportion_Social_Screen_Time,
+           color = ifelse(weekend, "red", "black")
+         )) +
+  geom_line(color = "steelblue") +
+  geom_point() +
+  xlab("Dates") + ylab("Daily Proportion Social Screen Time") +
+  labs(title = "Time Series plot - Daily Proportion Social Screen Time") +
+  theme_minimal() +
+  scale_color_manual(labels = c("weekdays", "weekends"),
+                     values = c("black", "red")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1),
+        legend.title = element_blank())
+PropST
+
+# Daily_Duration_Per_Use
+Duration <-
+  ggplot(ST01, aes(
+    x = Date,
+    y = Daily_Duration_Per_Use,
+    color = ifelse(weekend, "red", "black")
+  )) +
+  geom_line(color = "steelblue") +
+  geom_point() +
+  xlab("Dates") + ylab("Daily Duration Per Use") +
+  labs(title = "Time Series plot - Daily Duration Per Use") +
+  theme_minimal() +
+  scale_color_manual(labels = c("weekdays", "weekends"),
+                     values = c("black", "red")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1),
+        legend.title = element_blank())
+Duration
+
+# Daily_Duration_Per_Use
+Duration <-
+  ggplot(ST01, aes(
+    x = Date,
+    y = Daily_Duration_Per_Use,
+    color = ifelse(weekend, "red", "black")
+  )) +
+  geom_line(color = "steelblue") +
+  geom_point() +
+  xlab("Dates") + ylab("Daily Duration Per Use") +
+  labs(title = "Time Series plot - Daily Duration Per Use") +
+  theme_minimal() +
+  scale_color_manual(labels = c("weekdays", "weekends"),
+                     values = c("black", "red")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1),
+        legend.title = element_blank())
+Duration
+```
+### Personal Data - EDA
+```{r}
+PD <- readxl::read_excel("PersonData.xlsx")
+
+# Descriptive statistics using gtsummary
+descr_table <- PD %>%
+  select(age) %>%
+  tbl_summary(digits = list(age = c(3, 1)))
+
+# Visualization: Histogram for 'age'
+hist_plot <- ggplot(PD, aes(x = age)) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "black") +
+  labs(title = "Distribution of Age",
+       x = "Age",
+       y = "Count") +
+  theme_minimal()
+
+# Display the results
+print(descr_table)
+print(hist_plot)
+```
+
+```{r}
+head(ST01)
+# Assuming your dataset is stored in the variable 'ST01'
+# and the dependent variable is 'Total.ST.min'
+Y <- ST01$Total.ST.min
+X1 <- ST01$Social.ST.min
+X2 <- ST01$Pickups
+X3 <- ST01$Daily.Course.Hour
+X4 <- ST01$Daily_Proportion_Social_Screen_Time
+X5 <- ST01$Snow.NotSnow
+X6 <- ST01$Daily_Duration_Per_Use
+X <- c(X1, X2, X3)
+# ... (include all other covariates)
+
+# Calculate means -> No need to get standardized?
+mean_X <- c(mean(X1), mean(X2), mean(X3))
+mean_Y <- mean(Y)
+
+# Calculate SSxy, SSTx, and SSTy
+SSxy <- sum((X - mean_X) * (Y - mean_Y))
+SSTx <- sum((X - mean_X)^2)
+SSTy <- sum((Y - mean_Y)^2)
+
+# Calculate correlation coefficient (r)
+r <- cor(X1, Y)
+
+# Display the results
+cat("SSxy (Dk):", SSxy, "\n")
+cat("SSTx (Dk):", SSTx, "\n")
+cat("SSTy (Dk):", SSTy, "\n")
+cat("Mean X (Dk):", mean_X, "\n")
+cat("Mean Y (Dk):", mean_Y, "\n")
+cat("Correlation coefficient (r):", r, "\n")
+
+
+```
+
+```{r}
+model <- lm(Total.ST.min ~ Pickups + Daily.Course.Hour + Pickups + factor(Snow.NotSnow) , data = ST01)
+summary(model)
+
+```
