@@ -1,0 +1,139 @@
+---
+title: "ProjectI"
+author: "Charlotte Xu, Ruiyang Dong, Zihan Wang"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+# knitr::opts_chunk$set(out.width="200px", dpi=120)
+library(dplyr)
+library(ggplot2)
+# install.packages("GGally")
+library(GGally)
+library(circular)
+library(lubridate)
+# install.packages("corrplot")
+library(corrplot)
+library(gtsummary)
+library(readxl)
+
+```
+
+```{r}
+ST01 <- read_excel("620GroupData.xlsx", sheet = "01_ScreenActivity")
+ST02 <- read_excel("620GroupData.xlsx",sheet = '02_ScreenActivity')
+ST03 <- read_excel("620GroupData.xlsx",sheet = '03_ScreenActivity')
+
+ST_tot <- rbind(ST01,ST02,ST03)
+head(ST)
+```
+```{r}
+ST<-ST_tot
+
+ST$Date <- as.Date(ST$Date)
+ST$Pickup.1st <- as.POSIXct(ST$Pickup.1st, format = "%H:%M", tz = "UTC")
+ST$Hour <- hour(ST$Pickup.1st)
+ST$Minute <- minute(ST$Pickup.1st)
+ST$Pickup.Time <- circular((hour(ST$Pickup.1st)*60 + minute(ST$Pickup.1st)) / (24*60)*360)
+ST$Pickup.Time <- as.circular(ST$Pickup.Time, type = "angles", units = "degrees")
+
+Y = 'Social.ST.min'
+X1 = 'Daily.Course.min'
+X2 = 'Weather'
+X3 = 'Snow'
+X4 = 'Use.per.Pickup'
+X5 = 'Pickup.Time'
+
+ST <- ST %>%
+  mutate(across(where(is.numeric), ~ifelse(is.na(.), median(., na.rm = TRUE), .)))
+
+```
+
+```{r}
+var <- colnames(ST)
+quantiles <- quantile(ST$Social.ST.min, probs = c(0.5), na.rm = TRUE)
+quantiles
+ST$YQuantile <- as.character(cut(ST$Social.ST.min, breaks = c(-Inf, quantiles, Inf), labels = c("Below Average", "Above Average"), include.lowest = TRUE))
+```
+### Corr Plot
+```{r}
+ST_numerical <- ST[c(Y,X1,X2,X3,X4,X5)]
+
+corr_plot <- ggpairs(
+  ST_numerical,
+  columns = c(Y, X1, X2, X3, X4, X5),
+  columnLabels = c(Y, X1, X2, X3, X4, X5)
+) +
+  theme_bw()
+corr_plot
+```
+### TBL 1 for Screen Activity Data
+```{r}
+ST_tbl1 <- ST[c("YQuantile", X1, X2, X3, X4, X5)]
+TABLE1 <- ST_tbl1 %>% 
+  tbl_summary(
+    missing = "no",
+    by = YQuantile,
+    statistic = list(all_continuous()  ~ "{mean} ({sd})",
+                     all_categorical() ~ "{n}    ({p}%)"),
+    digits = list(all_continuous()  ~ c(2, 2),
+                  all_categorical() ~ c(0, 1)),
+    type = list(
+      Daily.Course.min ~ "continuous",
+      Weather ~ 'continuous',
+      Snow ~ "categorical",
+       Use.per.Pickup ~ "continuous",
+      Pickup.Time ~ "continuous"),
+  label  = list(Daily.Course.min ~ "Daily.Course.min",
+      Weather ~ 'Weather',
+      Snow ~ "Snow",
+       Use.per.Pickup ~ "Use.per.Pickup",
+      Pickup.Time ~ "Pickup.Time")
+  ) %>%
+  add_p(
+    test = list(
+                all_categorical() ~ "chisq.test"),
+    pvalue_fun = function(x) style_pvalue(x, digits = 3)
+  ) %>%
+  modify_header(
+    label = "**Variable**",
+    all_stat_cols() ~ "**{level}**<br>N = {n} ({style_percent(p, digits=1)}%)"
+  ) %>%
+  modify_caption("Participant characteristics, by SBP") %>%
+  bold_labels() %>% 
+  add_overall(last = FALSE,
+              col_label = "**All participants**<br>N = {N}")
+
+TABLE1
+
+```
+
+### Screen time - EDA
+
+```{r}
+ST_EDA <- ST[c('ID','Date',Y,X1,X2,X3,X4,X5)]
+ST_EDA
+starting_dates <- ST_EDA %>%
+  group_by(ID) %>%
+  summarize(Start_Date = min(Date))
+latest_start_date <- max(starting_dates$Start_Date)
+mean_values <- ST_EDA %>%
+  filter(Date >= latest_start_date) %>%
+  group_by(Date) %>%
+  summarise(
+    Mean.Social.ST.min = mean(Social.ST.min, na.rm = TRUE),
+    Mean.Daily.Course.min = mean(Daily.Course.min, na.rm = TRUE),
+    Mean.Use.per.Pickup = mean(Use.per.Pickup, na.rm = TRUE),
+    Mean.Pickup.Time = mean(Pickup.Time, na.rm = TRUE),
+  ) %>% mutate(weekend = ifelse(weekdays(Date) %in% c("Saturday", "Sunday"), TRUE, FALSE))
+
+ggplot(mean_values)  +  
+  geom_bar(aes(x=Date, y=Mean.Daily.Course.min),stat="identity", fill="steelblue",colour="steelblue")+ 
+  geom_line(aes(x=Date, y=Mean.Social.ST.min),stat="identity",color="orange")+ geom_point(aes(x=Date, y=Mean.Social.ST.min),stat="identity",color = ifelse(mean_values$weekend, "black", "red"))+
+  labs(title= "Daily Social Screen Time Usage and Daily Course Time", 
+       x="Date",y=" Minutes Spent ") 
+
+
+```
